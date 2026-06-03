@@ -1,3 +1,6 @@
+# Họ tên: Hồng Tiến Phát (24110295)
+#link github: https://github.com/TienPhat06/TriTueNhaoTao_10
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from collections import deque

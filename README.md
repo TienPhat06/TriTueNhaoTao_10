@@ -65,3 +65,5 @@ Bước 6: Làm mới hệ thống: Bấm nút "Reset" để xóa toàn bộ l�
 Hiện tượng kẹt cực đại cục bộ (Local Maximum): Đối với các thuật toán Tìm kiếm cục bộ như Simple Hill Climbing hay Steepest-Ascent Hill Climbing, do đặc thù giải thuật không lưu lại cây trạng thái nên rất dễ bị rơi vào trạng thái "kẹt" (không tìm được trạng thái lân cận nào tốt hơn hiện tại nhưng vẫn chưa đến được đích). Khi điều này xảy ra, hệ thống sẽ dừng lại và thông báo "KẸT CỰC ĐẠI CỤC BỘ / THẤT BẠI", đây là hành vi đúng theo lý thuyết AI của thuật toán chứ không phải lỗi chương trình.
 
 Thời gian xử lý đối với Tìm kiếm mù (Uninformed Search): Khi bạn cấu hình các trạng thái ban đầu có độ khó cao (cần nhiều bước dịch chuyển để tới đích), các thuật toán như DFS hoặc IDS có thể mất rất nhiều thời gian để xử lý hoặc tiêu tốn bộ nhớ lớn do phải bóc tách số lượng nút khổng lồ theo cấp số nhân. Nếu chương trình có dấu hiệu bị "đơ" (Not Responding), hãy kiên nhẫn chờ đợi thuật toán hoàn thành tính toán ngầm hoặc thử lại với một trạng thái đơn giản hơn.
+
+![Demo](./Visualization.gif)

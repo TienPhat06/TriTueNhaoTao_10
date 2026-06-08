@@ -1,6 +1,6 @@
 ![Demo](./Visualization.gif)
 ![Demo](./SimulatedAnnealing.gif)
-
+![Demo](./Belief-Start.gif)
 ---
 
 ## 🛠️ Các thuật toán tìm kiếm được tích hợp

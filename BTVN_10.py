@@ -1,9 +1,15 @@
+#Tên: Hồng Tiến Phát (24110295)
+#link github: https://github.com/TienPhat06/TriTueNhaoTao_10
+
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from collections import deque
 import heapq
+import itertools
 import random 
 import math
+import threading
 
 class PuzzleNode:
     def __init__(self, state, parent=None, action=None, cost=0, depth=0, heuristic=0):
@@ -60,6 +66,156 @@ def generate_random_solvable_state(goal, steps=20):
         if moves:
             current = list(random.choice(moves)[0])
     return tuple(current)
+
+def generate_concrete_states_from_partial(partial_state):
+    """Generate all concrete 8-puzzle states consistent with a partial belief state."""
+    unknown_positions = [i for i, v in enumerate(partial_state) if v == -1]
+    fixed_values = [v for v in partial_state if v != -1]
+    if len(fixed_values) != len(set(fixed_values)) or any(v not in range(9) for v in fixed_values):
+        raise ValueError("Partial state contains invalid or duplicate tile values.")
+    missing_values = [v for v in range(9) if v not in fixed_values]
+    for perm in itertools.permutations(missing_values):
+        full_state = list(partial_state)
+        for index, tile in zip(unknown_positions, perm):
+            full_state[index] = tile
+        yield tuple(full_state)
+
+
+def sample_random_concrete_states(partial_state, sample_size):
+    unknown_positions = [i for i, v in enumerate(partial_state) if v == -1]
+    missing_values = [v for v in range(9) if v not in partial_state]
+    total_candidates = math.factorial(len(unknown_positions))
+
+    if total_candidates <= 100000:
+        all_candidates = list(generate_concrete_states_from_partial(partial_state))
+        return random.sample(all_candidates, sample_size)
+
+    sampled = set()
+    while len(sampled) < sample_size:
+        perm = missing_values[:]
+        random.shuffle(perm)
+        full_state = list(partial_state)
+        for index, tile in zip(unknown_positions, perm):
+            full_state[index] = tile
+        sampled.add(tuple(full_state))
+    return list(sampled)
+
+
+def generate_random_initial_belief(partial_state, min_size=2, max_size=6, goal=None):
+    """Create a random initial belief set for blind belief-space search."""
+    unknown_positions = [i for i, v in enumerate(partial_state) if v == -1]
+    fixed_values = [v for v in partial_state if v != -1]
+    if len(fixed_values) != len(set(fixed_values)) or any(v not in range(9) for v in fixed_values):
+        raise ValueError("Partial state contains invalid hoặc duplicate tile values.")
+
+    belief = set()
+    if unknown_positions:
+        total_candidates = math.factorial(len(unknown_positions))
+        if total_candidates == 0:
+            raise ValueError("Không thể tạo trạng thái niềm tin hợp lệ từ trạng thái đầu đã cho.")
+        sample_size = random.randint(1, min(max_size, total_candidates))
+        belief.update(sample_random_concrete_states(partial_state, sample_size))
+
+    else:
+        belief.add(tuple(partial_state))
+
+    if len(belief) < min_size:
+        if goal is None:
+            raise ValueError("Goal must be provided when start state is fully specified for belief initialization.")
+        while len(belief) < min_size:
+            belief.add(generate_random_solvable_state(goal, steps=random.randint(10, 25)))
+
+    target_size = random.randint(max(min_size, len(belief)), max_size)
+    if goal is None and len(belief) < target_size:
+        target_size = len(belief)
+    while len(belief) < target_size:
+        belief.add(generate_random_solvable_state(goal, steps=random.randint(10, 25)))
+
+    return frozenset(belief)
+
+
+def get_possible_belief_moves(belief):
+    # Tạo ánh xạ (state, action) -> next_state để tra cứu nhanh
+    action_map = {}
+    all_actions = set()
+    
+    for state in belief:
+        for next_state, action in get_possible_moves(state):
+            action_map[(state, action)] = next_state
+            all_actions.add(action)
+    
+    # Với mỗi hành động, áp dụng lên tất cả các trạng thái trong belief
+    # Nếu trạng thái nào không thể thực hiện hành động thì giữ nguyên
+    result = []
+    for action in all_actions:
+        new_states = []
+        for state in belief:
+            if (state, action) in action_map:
+                new_states.append(action_map[(state, action)])
+            else:
+                new_states.append(state)  # Giữ nguyên nếu action không thực hiện được
+        result.append((frozenset(new_states), action))
+    
+    return result
+
+
+def run_belief_space_bfs(goal, max_iterations=5000):
+    history_log = []
+    # Preserve order of the two sampled initial concrete states for display
+    initial_belief_list = [generate_random_solvable_state(goal, steps=random.randint(10, 25)) for _ in range(2)]
+    initial_belief = frozenset(initial_belief_list)
+
+    trace_init = f"🧠 [THUẬT TOÁN: BLIND BELIEF-SPACE BFS]\n"
+    trace_init += f"⏳ VÒNG LẶP DUYỆT BAN ĐẦU (QUEUE - FIFO)\n--------------------------------------------------\n"
+    trace_init += f"▶️ Niềm tin ban đầu khởi tạo ngẫu nhiên (chỉ có 2 trạng thái): \n"
+    for belief_state in initial_belief_list:
+        trace_init += f"   + {belief_state}\n"
+    trace_init += f"▶️ Làm việc theo logic BFS trên không gian niềm tin: mỗi niềm tin vào queue, pop FIFO, sinh các niềm tin con, ghi nhận explored.\n"
+    trace_init += f"▶️ Giới hạn vòng lặp tối đa: {max_iterations}\n"
+    history_log.append({'current_node': initial_belief, 'frontier': [(initial_belief, 0)], 'explored': [], 'trace_text': trace_init, 'belief_list': initial_belief_list})
+
+    if initial_belief == frozenset([goal]) or all(s == goal for s in initial_belief):
+        return PuzzleNode(initial_belief), 0, history_log
+
+    frontier = deque([PuzzleNode(initial_belief, cost=0, depth=0)])
+    explored = set([initial_belief])
+    nodes_expanded = 0
+
+    while frontier:
+        nodes_expanded += 1
+        if nodes_expanded > max_iterations:
+            trace = f"🧠 [THUẬT TOÁN: BLIND BELIEF-SPACE BFS]\n"
+            trace += f"⏳ ĐÃ ĐẠT NGƯỠNG SỐ VÒNG LẶP TỐI ĐA = {max_iterations}. Dừng để tránh chờ quá lâu.\n"
+            history_log.append({'current_node': node.state if 'node' in locals() else initial_belief, 'frontier': [(n.state, n.depth) for n in frontier], 'explored': list(explored), 'trace_text': trace})
+            return None, nodes_expanded, history_log
+        node = frontier.popleft()
+        trace = f"🧠 [THUẬT TOÁN: BLIND BELIEF-SPACE BFS]\n"
+        trace += f"⏳ VÒNG LẶP DUYỆT THỨ #{nodes_expanded} (QUEUE - FIFO)\n--------------------------------------------------\n"
+        trace += f"▶️ Pop niềm tin từ queue: size hiện tại = {len(frontier) + 1}\n"
+        trace += f"▶️ Duyệt niềm tin hiện tại ({len(node.state)} khả năng):\n"
+        for belief_state in list(node.state)[:6]:
+            trace += f"   • {belief_state}\n"
+        if len(node.state) > 6:
+            trace += f"   ... ({len(node.state)-6} trạng thái còn lại)\n"
+        trace += f"\n🌿 Sinh các niềm tin kế tiếp từ mỗi hành động khả thi:\n"
+
+        for next_belief, action in get_possible_belief_moves(node.state):
+            if next_belief not in explored and not any(f.state == next_belief for f in frontier):
+                child = PuzzleNode(next_belief, parent=node, action=action, cost=node.depth+1, depth=node.depth+1)
+                if all(s == goal for s in next_belief):
+                    trace += f"   [🎯] Tìm thấy niềm tin đích (tất cả các trạng thái đều là đích) qua hành động [{action}]\n"
+                    current_frontier_data = [(n.state, n.depth) for n in frontier] + [(child.state, child.depth)]
+                    history_log.append({'current_node': node.state, 'frontier': current_frontier_data, 'explored': list(explored), 'trace_text': trace})
+                    return child, nodes_expanded, history_log
+                frontier.append(child)
+                trace += f"   [+ Add] Hành động [{action}] tạo niềm tin mới chứa {len(next_belief)} trạng thái.\n"
+            else:
+                trace += f"   [x Skip] Niềm tin tương tự đã được duyệt hoặc đang chờ.\n"
+
+        current_frontier_data = [(n.state, n.depth) for n in frontier]
+        history_log.append({'current_node': node.state, 'frontier': current_frontier_data, 'explored': list(explored), 'trace_text': trace})
+
+    return None, nodes_expanded, history_log
 
 # =========================================================================
 # THUẬT TOÁN ĐỒ THỊ VÀ KHÔNG GIAN TRẠNG THÁI (1 ĐẾN 7)
@@ -578,24 +734,18 @@ def run_local_beam_search(start, goal, k=4):
     history_log = []
     nodes_expanded = 0
     
-    current_state_set = [start]
-    for _ in range(k - 1):
-        random_s = generate_random_solvable_state(start, steps=random.randint(5, 15))
-        if random_s not in current_state_set:
-            current_state_set.append(random_s)
-        else:
-            current_state_set.append(generate_random_solvable_state(goal, steps=20))
+    # Bắt đầu với chỉ 1 state ban đầu (start state)
+    current_nodes = [PuzzleNode(start, cost=count_manhattan_distance(start, goal), heuristic=count_manhattan_distance(start, goal))]
 
-    current_nodes = [PuzzleNode(s, cost=count_manhattan_distance(s, goal), heuristic=count_manhattan_distance(s, goal)) for s in current_state_set]
-
-    trace_init = f"🌿🔦 [THUẬT TOÁN: TÌM KIẾM CHÙM CỤC BỘ - LOCAL BEAM SEARCH]\n⚙️ Cấu hình độ rộng chùm k = {k}\n--------------------------------------------------\n▶️ Khởi tạo chùm trạng thái ban đầu (Current_State_set):\n"
-    for idx, n in enumerate(current_nodes):
-        trace_init += f"   + Nút [{idx}]: {n.state} | h_Manhattan = {n.heuristic}\n"
+    trace_init = f"🌿🔦 [THUẬT TOÁN: TÌM KIẾM CHÙM CỤC BỘ - LOCAL BEAM SEARCH]\n⚙️ Cấu hình độ rộng chùm k = {k}\n--------------------------------------------------\n▶️ Khởi tạo với state ban đầu (Current_State_set):\n"
+    trace_init += f"   • {start} | h_Manhattan = {count_manhattan_distance(start, goal)}\n"
+    trace_init += f"▶️ Logic:\n   1. Sinh tất cả lân cận của mỗi state trong Current_State_set → Neighbor_States\n   2. Kiểm tra nếu tìm thấy Goal → Trả về ngay\n   3. Sắp xếp Neighbor_States theo h tốt dần\n   4. Lấy k trạng thái tốt nhất làm Current_State_set mới\n   5. Nếu không có cải tiến → Dừng\n"
+    history_log.append({'current_node': start, 'frontier': [], 'explored': [], 'trace_text': trace_init})
     history_log.append({'current_node': start, 'frontier': [], 'explored': [], 'trace_text': trace_init})
 
     while True:
         nodes_expanded += 1
-        trace = f"🌿 🔦 [LOCAL BEAM SEARCH] | BƯỚC DUYỆT CHÙM THỨ #{nodes_expanded}\n--------------------------------------------------\n▶️ Chùm hiện tại đang đứng ở các trạng thái:\n"
+        trace = f"🌿 🔦 [LOCAL BEAM SEARCH] | BƯỚC DUYỆT CHÙM THỨ #{nodes_expanded}\n--------------------------------------------------\n▶️ Chùm hiện tại (Current_State_set) có {len(current_nodes)} nút:\n"
         for n in current_nodes:
             trace += f"   • {n.state} (h = {n.heuristic})\n"
         trace += f"\n"
@@ -603,42 +753,58 @@ def run_local_beam_search(start, goal, k=4):
         neighbor_states_pool = []
         raw_frontier_data = []
 
-        trace += f"🔄 [2.1] SINH TRẠNG THÁI LÂN CẬN:\n"
+        trace += f"🔄 [1] SINH TẤT CẢ LÂN CẬN CỦA MỖI STATE TRONG CURRENT_STATE_SET:\n"
         for idx, p_node in enumerate(current_nodes):
             moves = get_possible_moves(p_node.state)
-            trace += f"   + Với State [{idx}] trong Current_State_set -> Sinh lân cận:\n"
+            trace += f"   + State [{idx}]: {p_node.state} → Sinh {len(moves)} lân cận:\n"
             for s, a in moves:
                 h_val = count_manhattan_distance(s, goal)
                 child = PuzzleNode(s, parent=p_node, action=a, cost=h_val, depth=p_node.depth+1, heuristic=h_val)
                 neighbor_states_pool.append(child)
                 raw_frontier_data.append([h_val, s, a, False])
-                trace += f"     -> Thêm vào Neighbor_States: [{a}] tới {s} (h = {h_val})\n"
+                trace += f"     • [{a}] → {s} (h = {h_val})\n"
+        trace += f"   Tổng cộng Neighbor_States có {len(neighbor_states_pool)} trạng thái.\n"
 
-        trace += f"\n🔍 [2.2] KIỂM TRA ĐÍCH:\n"
+        trace += f"\n🔍 [2] KIỂM TRA ĐÍCH TRONG NEIGHBOR_STATES:\n"
         for child in neighbor_states_pool:
             if child.state == goal:
-                trace += f"   [🎯🎯🎯] TRẢ VỀ Neighbor == Goal: {child.state}! Tìm thấy đích, dừng ngay lập tức.\n"
+                trace += f"   [🎯🎯🎯] TRẢ VỀ == Goal: {child.state}!\n   Dừng ngay lập tức - Tìm thấy đích!\n"
                 for item in raw_frontier_data:
                     if item[1] == goal: item[3] = True
                 history_log.append({'current_node': child.state, 'frontier': raw_frontier_data, 'explored': [], 'trace_text': trace})
                 return child, nodes_expanded, history_log
-        trace += f"   -> Chưa thấy trạng thái đích nào trong {len(neighbor_states_pool)} nút lân cận.\n"
+        trace += f"   → Chưa thấy đích trong {len(neighbor_states_pool)} nút lân cận.\n"
 
-        trace += f"\n%"
-        trace += f"   Sắp xếp Neighbor_States theo thứ tự giá trị hàm mục tiêu h tốt dần...\n"
+        trace += f"\n📊 [3-4] SORT NEIGHBOR_STATES VÀ CHỌN k TRẠNG THÁI TỐT NHẤT:\n"
+        trace += f"   Sắp xếp Neighbor_States theo giá trị h tốt dần (tăng dần)...\n"
         neighbor_states_pool.sort(key=lambda x: x.heuristic)
         
+        # Lấy k trạng thái tốt nhất
         next_nodes = neighbor_states_pool[:k]
+        best_h_new = next_nodes[0].heuristic if next_nodes else float('inf')
+        worst_h_old = max([n.heuristic for n in current_nodes])
 
         chosen_states = [n.state for n in next_nodes]
         for item in raw_frontier_data:
             if item[1] in chosen_states:
                 item[3] = True
 
-        trace += f"   👉 Current_State_set = Lấy {k} trạng thái tốt nhất từ tập đã sắp xếp:\n"
+        trace += f"   Chùm cũ: h_worst = {worst_h_old}\n"
+        trace += f"   Chùm mới: h_best = {best_h_new}\n"
+        trace += f"   👉 Chọn k = {k} trạng thái tốt nhất làm Current_State_set mới:\n"
         for i, n in enumerate(next_nodes):
             trace += f"     [{i}] {n.state} với h = {n.heuristic}\n"
         
+        # Điều kiện dừng: nếu không có cải tiến, dừng (local plateau/maximum)
+        trace += f"\n[5] KIỂM TRA ĐIỀU KIỆN DỪNG:\n"
+        if best_h_new >= worst_h_old:
+            trace += f"   ⚠️ KHÔNG CÓ CẢI TIẾN!\n"
+            trace += f"   h_best (chùm mới) = {best_h_new} >= h_worst (chùm cũ) = {worst_h_old}\n"
+            trace += f"   → KẾT THÚC THUẬT TOÁN (Local Plateau)\n"
+            history_log.append({'current_node': current_nodes[0].state, 'frontier': raw_frontier_data, 'explored': [n.state for n in current_nodes], 'trace_text': trace})
+            return None, nodes_expanded, history_log
+        
+        trace += f"   ✓ Có cải tiến (h_best < h_worst)\n   → Tiếp tục vòng lặp kế tiếp với chùm mới.\n"
         current_nodes = next_nodes
         history_log.append({'current_node': current_nodes[0].state, 'frontier': raw_frontier_data, 'explored': [n.state for n in current_nodes], 'trace_text': trace})
 
@@ -749,6 +915,7 @@ class PuzzleGUI:
         self.auto_job = None
         self.saved_res_node = None 
         self.has_solution = False 
+        self.blind_max_iterations = 5000
 
         self.create_widgets()
         self.update_board_visual(self.initial_state)
@@ -776,17 +943,20 @@ class PuzzleGUI:
             "Stochastic Hill Climbing (Leo đồi ngẫu nhiên)",
             "Random Restart Hill Climbing (Leo đồi lặp ngẫu nhiên)",
             "Local Beam Search (Tìm kiếm chùm cục bộ)",
-            "Simulated Annealing (Luyện kim mô phỏng)"
+            "Simulated Annealing (Luyện kim mô phỏng)",
+            "Blind Belief-Space Search (BFS)"
         ], font=("Helvetica", 9), state="readonly")
         self.algo_combo.current(12) # Mặc định trỏ sẵn vào Simulated Annealing
         self.algo_combo.pack(fill="x", padx=15, pady=6)
+        self.algo_combo.bind("<<ComboboxSelected>>", lambda e: self.on_algo_changed())
 
         io_frame = tk.Frame(cfg_box, bg="#f5f6fa")
         io_frame.pack(fill="x", padx=15, pady=4)
         io_frame.columnconfigure(1, weight=1)
         io_frame.columnconfigure(3, weight=1)
 
-        tk.Label(io_frame, text="Trạng thái ĐẦU:", font=("Helvetica", 9, "bold"), bg="#f5f6fa", fg="#34495e").grid(row=0, column=0, sticky="w", pady=2)
+        self.start_label = tk.Label(io_frame, text="Trạng thái ĐẦU:", font=("Helvetica", 9, "bold"), bg="#f5f6fa", fg="#34495e")
+        self.start_label.grid(row=0, column=0, sticky="w", pady=2)
         self.entry_start = tk.Entry(io_frame, font=("Courier New", 10, "bold"), justify="center", bd=1, relief="solid")
         self.entry_start.insert(0, "1 2 3 4 0 6 7 5 8")
         self.entry_start.grid(row=0, column=1, sticky="ew", padx=(5, 10), pady=2)
@@ -804,13 +974,26 @@ class PuzzleGUI:
         self.lbl_status = tk.Label(left_frame, text="Sẵn sàng khảo sát.", font=("Helvetica", 9, "bold"), bg="#f5f6fa", fg="#7f8c8d")
         self.lbl_status.pack()
 
-        self.board_frame = tk.Frame(left_frame, bg="#a4b0be", bd=2, relief="solid")
-        self.board_frame.pack(pady=2)
+        # Container to hold two boards side-by-side
+        boards_container = tk.Frame(left_frame, bg="#f5f6fa")
+        boards_container.pack(pady=2)
+
+        self.board_frame = tk.Frame(boards_container, bg="#a4b0be", bd=2, relief="solid")
+        self.board_frame.pack(side="left", padx=4)
         self.buttons = []
         for i in range(9):
-            btn = tk.Button(left_frame, text="", font=("Helvetica", 16, "bold"), width=4, height=2, relief="flat", state="disabled")
-            btn.grid(in_=self.board_frame, row=i//3, column=i%3, padx=2, pady=2)
+            btn = tk.Button(self.board_frame, text="", font=("Helvetica", 16, "bold"), width=4, height=2, relief="flat", state="disabled")
+            btn.grid(row=i//3, column=i%3, padx=2, pady=2)
             self.buttons.append(btn)
+
+        # Second board for displaying a second belief-state (when using Blind Belief-Space)
+        self.board2_frame = tk.Frame(boards_container, bg="#a4b0be", bd=2, relief="solid")
+        self.board2_frame.pack(side="left", padx=4)
+        self.buttons2 = []
+        for i in range(9):
+            btn2 = tk.Button(self.board2_frame, text="", font=("Helvetica", 16, "bold"), width=4, height=2, relief="flat", state="disabled")
+            btn2.grid(row=i//3, column=i%3, padx=2, pady=2)
+            self.buttons2.append(btn2)
 
         playback_group = tk.LabelFrame(left_frame, text=" Bộ điều khiển xem tiến trình từng bước duyệt ", font=("Helvetica", 9), bg="#f5f6fa")
         playback_group.pack(fill="x", pady=2)
@@ -868,12 +1051,49 @@ class PuzzleGUI:
         self.txt_explored.pack(side="left", fill="both", expand=True, padx=2, pady=2)
 
     def update_board_visual(self, current_state, parent_state=None):
+        # If current_state is a belief (frozenset), try to display up to two concrete states simultaneously
+        state1 = None
+        state2 = None
+        if isinstance(current_state, frozenset):
+            # Prefer an ordered pair preserved on the history step (for initial belief)
+            pair = getattr(self, 'current_belief_pair', None)
+            if pair:
+                state1 = pair[0] if len(pair) > 0 else None
+                state2 = pair[1] if len(pair) > 1 else None
+            else:
+                states = list(current_state)
+                state1 = states[0] if len(states) > 0 else None
+                state2 = states[1] if len(states) > 1 else None
+        else:
+            state1 = current_state
+            state2 = None
+
+        if isinstance(parent_state, frozenset):
+            parent_state = next(iter(parent_state))
         moved_index = parent_state.index(0) if parent_state else None
-        for i in range(9):
-            val = current_state[i]
-            if val == 0: self.buttons[i].config(text="", bg="#34495e")
-            elif i == moved_index: self.buttons[i].config(text=str(val), bg="#f1c40f", fg="#000000")
-            else: self.buttons[i].config(text=str(val), bg="#ffffff", fg="#2f3542")
+
+        # Update primary board
+        if state1:
+            for i in range(9):
+                val = state1[i]
+                if val == 0: self.buttons[i].config(text="", bg="#34495e")
+                elif i == moved_index: self.buttons[i].config(text=str(val), bg="#f1c40f", fg="#000000")
+                else: self.buttons[i].config(text=str(val), bg="#ffffff", fg="#2f3542")
+        else:
+            for b in self.buttons:
+                b.config(text="", bg="#a4b0be")
+
+        # Update secondary board (show if there is a second concrete state)
+        if state2:
+            if not self.board2_frame.winfo_ismapped():
+                self.board2_frame.pack(pady=2)
+            for i in range(9):
+                val = state2[i]
+                if val == 0: self.buttons2[i].config(text="", bg="#34495e")
+                else: self.buttons2[i].config(text=str(val), bg="#ffffff", fg="#2f3542")
+        else:
+            if self.board2_frame.winfo_ismapped():
+                self.board2_frame.pack_forget()
 
     def reset_simulation_on_algo_change(self):
         self.pause_simulation()
@@ -888,48 +1108,96 @@ class PuzzleGUI:
         self.txt_solution_path.delete("1.0", tk.END)
         
         algo_choice = self.algo_combo.get()
-        if "BFS" in algo_choice: self.front_panel.config(text=" Frontier List (Hàng đợi Queue - FIFO) ")
+
+        # Reset any saved belief pair by default
+        self.current_belief_pair = None
+        if "BFS" in algo_choice and "Belief" not in algo_choice: self.front_panel.config(text=" Frontier List (Hàng đợi Queue - FIFO) ")
         elif "DFS" in algo_choice: self.front_panel.config(text=" Frontier List (Ngăn xếp Stack - LIFO) ")
         elif "IDS" in algo_choice: self.front_panel.config(text=" Frontier List (Ngăn xếp Stack DFS giới hạn tầng) ")
         elif "UCS" in algo_choice: self.front_panel.config(text=" Frontier List (Min-Heap sắp xếp theo g(n)) ")
         elif "Greedy" in algo_choice: self.front_panel.config(text=" Frontier List (Min-Heap ưu tiên theo h(n)) ")
         elif "A*" in algo_choice: self.front_panel.config(text=" Frontier List (Min-Heap sắp xếp theo f(n) = g + h) ")
         elif "IDA*" in algo_choice: self.front_panel.config(text=" Frontier Trạng thái duyệt theo Bound f(n) ")
+        elif "Blind" in algo_choice: self.front_panel.config(text=" Frontier niềm tin (Queue FIFO - Belief Space BFS) ")
         elif "Beam" in algo_choice: self.front_panel.config(text=" Toàn bộ lân cận sinh ra (Neighbor_States) ")
         elif "Annealing" in algo_choice: self.front_panel.config(text=" Trạng thái lân cận ngẫu nhiên được chọn thử nghiệm ")
         else: self.front_panel.config(text=" Nhánh lân cận (Đang sinh thực tế) ")
+
+        if "Blind" in algo_choice:
+            self.prepare_blind_initial_belief()
 
         self.lbl_status.config(text="Đã chuyển thuật toán. Hãy nhấn nút Go!", fg="#e67e22")
         self.lbl_progress.config(text="Vòng duyệt: 0 / 0")
         self.disable_playback_buttons()
         self.btn_continue.config(state="normal")
 
+    def on_algo_changed(self):
+        algo_choice = self.algo_combo.get()
+        if "Blind" in algo_choice:
+            self.start_label.grid_remove()
+            self.entry_start.grid_remove()
+            self.lbl_status.config(text=f"Blind Belief-Space: Chỉ cần trạng thái ĐÍCH. Niềm tin ban đầu tự động khởi tạo (2 trạng thái). Giới hạn vòng lặp = {self.blind_max_iterations}.", fg="#16a085")
+            self.prepare_blind_initial_belief()
+        else:
+            self.start_label.grid()
+            self.entry_start.grid()
+            self.lbl_status.config(text="Sẵn sàng khảo sát.", fg="#7f8c8d")
+
     def submit_custom_states(self):
+        algo_choice = self.algo_combo.get()
         try:
-            s_str = self.entry_start.get().strip().split()
             g_str = self.entry_goal.get().strip().split()
-            if len(s_str) != 9 or len(g_str) != 9: raise ValueError
-            self.initial_state = tuple(int(x) for x in s_str)
+            if len(g_str) != 9: raise ValueError
             self.goal_state = tuple(int(x) for x in g_str)
-            if set(self.initial_state) != set(range(9)): raise ValueError
+            if any(x not in range(9) for x in self.goal_state) or set(self.goal_state) != set(range(9)): raise ValueError
+            
+            if "Blind" not in algo_choice:
+                s_str = self.entry_start.get().strip().split()
+                if len(s_str) != 9: raise ValueError
+                self.initial_state = tuple(int(x) for x in s_str)
+                if any(x not in range(-1, 9) for x in self.initial_state): raise ValueError
+                known_tiles = [x for x in self.initial_state if x != -1]
+                if len(known_tiles) != len(set(known_tiles)): raise ValueError
+            else:
+                self.initial_state = self.goal_state
+            
             self.reset_simulation_on_algo_change()
         except ValueError:
-            messagebox.showerror("Lỗi dữ liệu", "Chuỗi số nhập vào phải từ 0 đến 8 và cách nhau bởi khoảng trắng.")
+            if "Blind" in algo_choice:
+                messagebox.showerror("Lỗi dữ liệu", "Chuỗi số trạng thái ĐÍCH phải gồm 9 số từ 0 đến 8, mỗi số xuất hiện đúng một lần.")
+            else:
+                messagebox.showerror("Lỗi dữ liệu", "Chuỗi số nhập vào phải gồm 9 số, trong đó trạng thái đầu có thể chứa -1 cho vị trí chưa biết. Mỗi số 0-8 chỉ xuất hiện một lần trong trạng thái đích.")
+
+    def prepare_blind_initial_belief(self):
+        """Generate two distinct concrete states for immediate blind belief visualization."""
+        if self.goal_state is None:
+            return
+        first_state = generate_random_solvable_state(self.goal_state, steps=random.randint(10, 25))
+        second_state = generate_random_solvable_state(self.goal_state, steps=random.randint(10, 25))
+        while second_state == first_state:
+            second_state = generate_random_solvable_state(self.goal_state, steps=random.randint(10, 25))
+        self.current_belief_pair = [first_state, second_state]
+        self.update_board_visual(frozenset(self.current_belief_pair))
 
     def calculate_solution_background(self):
         algo_choice = self.algo_combo.get()
-        if "BFS" in algo_choice: res_node, nodes, history = run_bfs(self.initial_state, self.goal_state)
+        if "Blind" not in algo_choice:
+            if -1 in self.initial_state:
+                messagebox.showerror("Lỗi dữ liệu", "Trạng thái đầu chứa -1 chỉ dùng cho Blind Belief-Space Search.")
+                return False
+        if "BFS" in algo_choice and "Belief" not in algo_choice: res_node, nodes, history = run_bfs(self.initial_state, self.goal_state)
         elif "DFS" in algo_choice: res_node, nodes, history = run_dfs(self.initial_state, self.goal_state)
         elif "IDS" in algo_choice: res_node, nodes, history = run_ids(self.initial_state, self.goal_state)
         elif "UCS" in algo_choice: res_node, nodes, history = run_ucs(self.initial_state, self.goal_state)
         elif "Greedy" in algo_choice: res_node, nodes, history = run_greedy(self.initial_state, self.goal_state)
         elif "A*" in algo_choice: res_node, nodes, history = run_astar(self.initial_state, self.goal_state)
         elif "IDA*" in algo_choice: res_node, nodes, history = run_idastar(self.initial_state, self.goal_state)
+        elif "Blind" in algo_choice: res_node, nodes, history = run_belief_space_bfs(self.goal_state, max_iterations=self.blind_max_iterations)
         elif "đơn giản" in algo_choice: res_node, nodes, history = run_hill_climbing(self.initial_state, self.goal_state)
         elif "dốc đứng" in algo_choice: res_node, nodes, history = run_steepest_ascent_hill_climbing(self.initial_state, self.goal_state)
         elif "ngẫu nhiên" in algo_choice and "lặp" not in algo_choice: res_node, nodes, history = run_stochastic_hill_climbing(self.initial_state, self.goal_state)
         elif "lặp" in algo_choice: res_node, nodes, history = run_random_restart_hill_climbing(self.initial_state, self.goal_state, max_restart=5)
-        elif "Beam" in algo_choice: res_node, nodes, history = run_local_beam_search(self.initial_state, self.goal_state, k=3)
+        elif "Beam" in algo_choice: res_node, nodes, history = run_local_beam_search(self.initial_state, self.goal_state, k=4)
         else: res_node, nodes, history = run_simulated_annealing(self.initial_state, self.goal_state, T0=100.0, Tmin=0.1, alpha=0.95)
 
         self.algorithm_history = history
@@ -945,6 +1213,39 @@ class PuzzleGUI:
 
         self.has_solution = True
         return True
+
+    def compute_algorithm(self):
+        """Run selected algorithm logic but return results without touching GUI (safe to call in background thread)."""
+        algo_choice = self.algo_combo.get()
+        # Validation for non-blind algorithms must be done on main thread prior to calling this.
+        if "BFS" in algo_choice and "Belief" not in algo_choice:
+            return run_bfs(self.initial_state, self.goal_state)
+        elif "DFS" in algo_choice:
+            return run_dfs(self.initial_state, self.goal_state)
+        elif "IDS" in algo_choice:
+            return run_ids(self.initial_state, self.goal_state)
+        elif "UCS" in algo_choice:
+            return run_ucs(self.initial_state, self.goal_state)
+        elif "Greedy" in algo_choice:
+            return run_greedy(self.initial_state, self.goal_state)
+        elif "A*" in algo_choice:
+            return run_astar(self.initial_state, self.goal_state)
+        elif "IDA*" in algo_choice:
+            return run_idastar(self.initial_state, self.goal_state)
+        elif "Blind" in algo_choice:
+            return run_belief_space_bfs(self.goal_state, max_iterations=self.blind_max_iterations)
+        elif "đơn giản" in algo_choice:
+            return run_hill_climbing(self.initial_state, self.goal_state)
+        elif "dốc đứng" in algo_choice:
+            return run_steepest_ascent_hill_climbing(self.initial_state, self.goal_state)
+        elif "ngẫu nhiên" in algo_choice and "lặp" not in algo_choice:
+            return run_stochastic_hill_climbing(self.initial_state, self.goal_state)
+        elif "lặp" in algo_choice:
+            return run_random_restart_hill_climbing(self.initial_state, self.goal_state, max_restart=5)
+        elif "Beam" in algo_choice:
+            return run_local_beam_search(self.initial_state, self.goal_state, k=4)
+        else:
+            return run_simulated_annealing(self.initial_state, self.goal_state, T0=100.0, Tmin=0.1, alpha=0.95)
 
     def print_solution_log(self):
         self.txt_solution_path.delete("1.0", tk.END)
@@ -975,8 +1276,14 @@ class PuzzleGUI:
         self.txt_frontier.delete("1.0", tk.END)
         self.txt_explored.delete("1.0", tk.END)
         algo_choice = self.algo_combo.get()
+
+        def display_state(value):
+            if isinstance(value, frozenset):
+                if not value: return "<Empty Belief>"
+                return next(iter(value))
+            return value
         
-        if "BFS" in algo_choice:
+        if "BFS" in algo_choice and "Belief" not in algo_choice:
             self.txt_frontier.insert(tk.END, f"--- QUEUE HIỆN TẠI ({len(step_data['frontier'])} nút) ---\n")
             for idx, item in enumerate(step_data['frontier']):
                 state, d = item if isinstance(item, tuple) else (item, 0)
@@ -1005,6 +1312,22 @@ class PuzzleGUI:
             if step_data['frontier']:
                 b_v = step_data['frontier'][0][0]
                 self.txt_frontier.insert(tk.END, f"Ngưỡng chặn Bound hiện tại: {b_v}\nĐang quét sâu hạ tầng DFS...")
+        elif "Blind" in algo_choice:
+            # If this history step preserved an ordered belief list, use it to display the two initial states consistently
+            if 'belief_list' in step_data:
+                self.current_belief_pair = step_data['belief_list']
+            else:
+                # fallback: show any two elements from the frozenset in arbitrary order
+                if isinstance(step_data['current_node'], frozenset):
+                    tmp = list(step_data['current_node'])
+                    self.current_belief_pair = tmp[:2]
+
+            self.txt_frontier.insert(tk.END, f"--- BELIEF SPACE BFS QUEUE (FIFO) - MÔ PHỎNG THEO LOGIC BFS ---\n")
+            for idx, item in enumerate(step_data['frontier']):
+                belief, d = item if isinstance(item, tuple) else (item, 0)
+                display = display_state(belief)
+                flag = " (* DUYỆT)" if belief == step_data['current_node'] and self.current_step_index > 0 else ""
+                self.txt_frontier.insert(tk.END, f"[{idx}] (d={d}, size={len(belief)}): {display}{flag}\n")
         elif "Hill Climbing" in algo_choice or "Steepest" in algo_choice or "Stochastic" in algo_choice or "lặp" in algo_choice or "Beam" in algo_choice or "Annealing" in algo_choice:
             self.txt_frontier.insert(tk.END, f"--- LÂN CẬN (NEIGHBORS) ĐÃ SINH TRONG LƯỢT ---\n")
             if not step_data['frontier']: 
@@ -1088,14 +1411,43 @@ class PuzzleGUI:
             self.update_playback_ui_state()
 
     def continue_simulation(self):
+        # If we don't have a prepared solution history yet, compute it in a background thread
         if not self.has_solution:
-            self.txt_solution_path.delete("1.0", tk.END)
-            if not self.calculate_solution_background(): return
-            self.current_step_index = 0
-            if self.algorithm_history:
-                self.update_board_visual(self.algorithm_history[0]['current_node'])
-                self.sync_all_workspace_logs()
+            # Validate inputs on main thread to avoid GUI calls from worker
+            algo_choice = self.algo_combo.get()
+            if "Blind" not in algo_choice and -1 in self.initial_state:
+                messagebox.showerror("Lỗi dữ liệu", "Trạng thái đầu chứa -1 chỉ dùng cho Blind Belief-Space Search.")
+                return
 
+            self.txt_solution_path.delete("1.0", tk.END)
+            self.lbl_status.config(text="Đang tính toán (không chặn giao diện)...", fg="#f39c12")
+            self.disable_playback_buttons()
+
+            def worker():
+                res_node, nodes, history = self.compute_algorithm()
+
+                def on_done():
+                    # apply results on main thread
+                    self.algorithm_history = history
+                    self.saved_res_node = res_node
+                    self.has_solution = True
+                    self.current_step_index = 0
+                    if self.algorithm_history:
+                        self.update_board_visual(self.algorithm_history[0]['current_node'])
+                        self.sync_all_workspace_logs()
+                    # start playing automatically
+                    self.is_playing = True
+                    algo_short = self.algo_combo.get().split()[0]
+                    self.lbl_status.config(text=f"Đang mô phỏng {algo_short}...", fg="#2ecc71")
+                    self.update_playback_ui_state()
+                    self.auto_play_loop()
+
+                self.root.after(0, on_done)
+
+            threading.Thread(target=worker, daemon=True).start()
+            return
+
+        # If we already have history computed, just start playback
         self.is_playing = True
         algo_short = self.algo_combo.get().split()[0]
         self.lbl_status.config(text=f"Đang mô phỏng {algo_short}...", fg="#2ecc71")
@@ -1113,14 +1465,21 @@ class PuzzleGUI:
     def reset_simulation(self):
         self.pause_simulation()
         self.current_step_index = 0
+        self.algorithm_history = []
+        self.has_solution = False
+        self.saved_res_node = None
         self.txt_solution_path.delete("1.0", tk.END)
         self.txt_trace.delete("1.0", tk.END)
         self.txt_frontier.delete("1.0", tk.END)
         self.txt_explored.delete("1.0", tk.END)
         self.update_board_visual(self.initial_state)
-        if self.algorithm_history: self.sync_all_workspace_logs()
         self.lbl_status.config(text="Đã làm mới đồ thị lý thuyết.", fg="#7f8c8d")
         self.update_playback_ui_state()
+        self.btn_prev.config(state="disabled")
+        self.btn_pause.config(state="disabled")
+        self.btn_next.config(state="disabled")
+        self.btn_continue.config(state="normal")
+        self.btn_reset.config(state="normal")
 
     def solve_and_print_immediately(self):
         if self.calculate_solution_background():

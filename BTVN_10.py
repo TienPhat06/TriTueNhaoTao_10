@@ -1,11 +1,9 @@
-# Họ tên: Hồng Tiến Phát (24110295)
-#link github: https://github.com/TienPhat06/TriTueNhaoTao_10
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from collections import deque
 import heapq
 import random 
+import math
 
 class PuzzleNode:
     def __init__(self, state, parent=None, action=None, cost=0, depth=0, heuristic=0):
@@ -55,7 +53,7 @@ def count_manhattan_distance(state, goal):
     return distance
 
 def generate_random_solvable_state(goal, steps=20):
-    """🎲 Sinh trạng thái ngẫu nhiên chắc chắn giải được bằng cách trượt từ ĐÍCH (dùng cho Restart / Beam)"""
+    """🎲 Sinh trạng thái ngẫu nhiên chắc chắn giải được bằng cách trượt từ ĐÍCH"""
     current = list(goal)
     for _ in range(steps):
         moves = get_possible_moves(tuple(current))
@@ -357,7 +355,7 @@ def run_idastar(start, goal, max_limit=3000):
         bound = t
 
 # =========================================================================
-# THUẬT TOÁN LOCAL SEARCH & LEO ĐỒI (8 ĐẾN 12)
+# THUẬT TOÁN LOCAL SEARCH & LEO ĐỒI (8 ĐẾN 13)
 # =========================================================================
 
 def run_hill_climbing(start, goal):
@@ -452,6 +450,7 @@ def run_steepest_ascent_hill_climbing(start, goal):
             return None, nodes_expanded, history_log
 
 def run_stochastic_hill_climbing(start, goal):
+    """⛰️🎲 Thuật toán Leo đồi ngẫu nhiên chuẩn slide bài giảng"""
     history_log = []
     h_start = count_manhattan_distance(start, goal)
     
@@ -488,7 +487,7 @@ def run_stochastic_hill_climbing(start, goal):
 
         if not better_neighbors_list:
             trace += f"\n   [🛑 KẸT CỰC ĐẠI CỤC BỘ / LOCAL MAXIMUM]\n"
-            trace += f"   + Tập Better_Neighbors RỖNG! Không có lân cận nào tối ưu hơn.\n"
+            trace += f"   + Tập Better_Neighbors RỖNG! Không có lân cận nào tối ưu hơn. Trả về trạng thái hiện thời.\n"
             history_log.append({'current_node': current_node.state, 'frontier': raw_neighbor_data, 'explored': [], 'trace_text': trace})
             return None, nodes_expanded, history_log
         else:
@@ -504,6 +503,7 @@ def run_stochastic_hill_climbing(start, goal):
             history_log.append({'current_node': current_node.state, 'frontier': raw_neighbor_data, 'explored': [], 'trace_text': trace})
 
 def run_random_restart_hill_climbing(start, goal, max_restart=5):
+    """🔄⛰️ Thuật toán Leo đồi lặp khởi động lại ngẫu nhiên chuẩn slide bài giảng"""
     history_log = []
     total_steps = 0
     
@@ -554,9 +554,9 @@ def run_random_restart_hill_climbing(start, goal, max_restart=5):
 
             if not better_neighbors_list:
                 trace += f"\n   [🛑 LƯỢT CHẠY i = {i} BỊ KẸT CỰC ĐẠI CỤC BỘ]\n"
-                trace += f"   ❌ Tập Better_Neighbors trống rỗng! Không thể đi tiếp.\n"
+                trace += f"   ❌ Tập Better_Neighbors trống rỗng! Thoát vòng lặp con, nhảy sang lượt i kế tiếp.\n"
                 history_log.append({'current_node': current_node.state, 'frontier': raw_neighbor_data, 'explored': [], 'trace_text': trace})
-                break 
+                break
             else:
                 chosen_node = random.choice(better_neighbors_list)
                 
@@ -569,11 +569,12 @@ def run_random_restart_hill_climbing(start, goal, max_restart=5):
                 current_node = chosen_node
                 history_log.append({'current_node': current_node.state, 'frontier': raw_neighbor_data, 'explored': [], 'trace_text': trace})
 
-    trace_fail = f"❌ KẾT QUẢ CUỐI CÙNG: THẤT BẠI HOÀN TOÀN!\n"
+    trace_fail = f"❌ KẾT QUẢ CUỐI CÙNG: THẤT BẠI HOÀN TOÀN!\nChạy hết sạch sành sanh MAX_RESTART lượt mà không chạm được Goal.\n"
     history_log.append({'current_node': start, 'frontier': [], 'explored': [], 'trace_text': trace_fail})
     return None, total_steps, history_log
 
 def run_local_beam_search(start, goal, k=4):
+    """🔦🌿 Thuật toán Tìm kiếm chùm cục bộ chuẩn slide bài giảng"""
     history_log = []
     nodes_expanded = 0
     
@@ -599,51 +600,135 @@ def run_local_beam_search(start, goal, k=4):
             trace += f"   • {n.state} (h = {n.heuristic})\n"
         trace += f"\n"
 
-        for n in current_nodes:
-            if n.state == goal:
-                trace += f"   [🎯] Tìm thấy ĐÍCH ngay trong tập chùm hiện thời!\n"
-                history_log.append({'current_node': n.state, 'frontier': [], 'explored': [], 'trace_text': trace})
-                return n, nodes_expanded, history_log
-
-        neighbor_nodes_pool = []
+        neighbor_states_pool = []
         raw_frontier_data = []
 
-        trace += f"🔄 [2.1] TIẾN HÀNH SINH CÁC LÂN CẬN CHO TOÀN BỘ CHÙM:\n"
+        trace += f"🔄 [2.1] SINH TRẠNG THÁI LÂN CẬN:\n"
         for idx, p_node in enumerate(current_nodes):
             moves = get_possible_moves(p_node.state)
-            trace += f"   + Từ Nút chùm [{idx}] -> Sinh được {len(moves)} nhánh con:\n"
+            trace += f"   + Với State [{idx}] trong Current_State_set -> Sinh lân cận:\n"
             for s, a in moves:
                 h_val = count_manhattan_distance(s, goal)
                 child = PuzzleNode(s, parent=p_node, action=a, cost=h_val, depth=p_node.depth+1, heuristic=h_val)
-                neighbor_nodes_pool.append(child)
+                neighbor_states_pool.append(child)
                 raw_frontier_data.append([h_val, s, a, False])
-                trace += f"     -> Nhánh [{a}] tới {s} (h = {h_val})\n"
+                trace += f"     -> Thêm vào Neighbor_States: [{a}] tới {s} (h = {h_val})\n"
 
-        trace += f"\n🔍 [2.2] KIỂM TRA ĐÍCH TRÊN TẬP LÂN CẬN CHUNG:\n"
-        for child in neighbor_nodes_pool:
+        trace += f"\n🔍 [2.2] KIỂM TRA ĐÍCH:\n"
+        for child in neighbor_states_pool:
             if child.state == goal:
-                trace += f"   [🎯🎯🎯] TÌM THẤY ĐÍCH TRONG TẬP LÂN CẬN: {child.state}! Dừng thuật toán.\n"
+                trace += f"   [🎯🎯🎯] TRẢ VỀ Neighbor == Goal: {child.state}! Tìm thấy đích, dừng ngay lập tức.\n"
                 for item in raw_frontier_data:
                     if item[1] == goal: item[3] = True
                 history_log.append({'current_node': child.state, 'frontier': raw_frontier_data, 'explored': [], 'trace_text': trace})
                 return child, nodes_expanded, history_log
-        trace += f"   -> Chưa thấy trạng thái đích nào trong {len(neighbor_nodes_pool)} nút lân cận.\n"
+        trace += f"   -> Chưa thấy trạng thái đích nào trong {len(neighbor_states_pool)} nút lân cận.\n"
 
-        trace += f"\n📊 [2.3] LỰA CHỌN CHÙM (Sắp xếp hàm h tốt dần để lấy {k} nút tốt nhất):\n"
-        neighbor_nodes_pool.sort(key=lambda x: x.heuristic)
-        next_nodes = neighbor_nodes_pool[:k]
+        trace += f"\n%"
+        trace += f"   Sắp xếp Neighbor_States theo thứ tự giá trị hàm mục tiêu h tốt dần...\n"
+        neighbor_states_pool.sort(key=lambda x: x.heuristic)
+        
+        next_nodes = neighbor_states_pool[:k]
 
         chosen_states = [n.state for n in next_nodes]
         for item in raw_frontier_data:
             if item[1] in chosen_states:
                 item[3] = True
 
-        trace += f"   👉 Đã chọn xong {k} trạng thái tốt nhất đưa vào vòng lặp sau:\n"
+        trace += f"   👉 Current_State_set = Lấy {k} trạng thái tốt nhất từ tập đã sắp xếp:\n"
         for i, n in enumerate(next_nodes):
             trace += f"     [{i}] {n.state} với h = {n.heuristic}\n"
         
         current_nodes = next_nodes
         history_log.append({'current_node': current_nodes[0].state, 'frontier': raw_frontier_data, 'explored': [n.state for n in current_nodes], 'trace_text': trace})
+
+def run_simulated_annealing(start, goal, T0=100.0, Tmin=0.1, alpha=0.95):
+    """🔥🌡️ Thuật toán Luyện kim mô phỏng - SỬ DỤNG SỐ Ô SAI VỊ TRÍ (MISPLACED TILES)"""
+    history_log = []
+    nodes_expanded = 0
+    
+    current_state = start
+    # Tính số ô sai vị trí ban đầu (h_current)
+    h_current = count_misplaced_tiles(current_state, goal)
+    current_node = PuzzleNode(current_state, cost=h_current, heuristic=h_current)
+    
+    T = T0
+    
+    trace_init = f"🔥🌡️ [THUẬT TOÁN: LUYỆN KIM MÔ PHỎNG - SIMULATED ANNEALING]\n"
+    trace_init += f"⚙️ Cấu hình: T0 = {T0} | Tmin = {Tmin} | alpha = {alpha}\n"
+    trace_init += f"--------------------------------------------------\n"
+    trace_init += f"▶️ current state = start: {current_state} | h_Misplaced = {h_current}\n"
+    history_log.append({'current_node': current_state, 'frontier': [], 'explored': [], 'trace_text': trace_init})
+
+    while T > Tmin:
+        nodes_expanded += 1
+        trace = f"🔥🌡️ [SIMULATED ANNEALING] | VÒNG LẶP THỨ #{nodes_expanded} | NHIỆT ĐỘ T = {T:.4f}\n"
+        trace += f"--------------------------------------------------\n"
+        trace += f"▶️ Điểm đứng hiện tại: {current_node.state} | h_sai_vị_trí = {current_node.heuristic}\n\n"
+
+        if current_node.state == goal:
+            trace += f"   [🎯] return current state (Tìm thấy đích!)\n"
+            history_log.append({'current_node': current_node.state, 'frontier': [], 'explored': [], 'trace_text': trace})
+            return current_node, nodes_expanded, history_log
+
+        neighbors = get_possible_moves(current_node.state)
+        if not neighbors:
+            trace += f"   ❌ Bị kẹt không thể sinh lân cận.\n"
+            history_log.append({'current_node': current_node.state, 'frontier': [], 'explored': [], 'trace_text': trace})
+            break
+
+        # next state = RandomNeighbor(current state)
+        chosen_move = random.choice(neighbors)
+        next_state, action = chosen_move[0], chosen_move[1]
+        
+        # Tính số ô sai vị trí của trạng thái lân cận ngẫu nhiên (h_next)
+        h_next = count_misplaced_tiles(next_state, goal)
+        
+        # Delta = h(next state) - h(current state)
+        delta = h_next - current_node.heuristic
+        
+        raw_frontier_data = [[h_next, next_state, action, False]]
+        trace += f"🎲 next state = RandomNeighbor: Nhánh [{action}] -> {next_state} (h_mới = {h_next} ô sai)\n"
+        trace += f"📊 Delta = h(next) - h(current) = {h_next} - {current_node.heuristic} = {delta}\n\n"
+
+        # if Delta < 0
+        if delta < 0:
+            trace += f"   [👍 CHẤP NHẬN] Delta < 0 (Số ô sai giảm): current = next\n"
+            raw_frontier_data[0][3] = True
+            current_node = PuzzleNode(next_state, parent=current_node, action=action, cost=h_next, depth=current_node.depth+1, heuristic=h_next)
+        else:
+            # p = exp(-Delta / T)
+            p = math.exp(-delta / T) if T > 0 else 0
+            rand_val = random.random()
+            
+            trace += f"   ⚠️ [ĐIỂM XẤU HƠN HOẶC BẰNG]: Tính xác suất p = exp(-Delta/T) = {p:.6f}\n"
+            trace += f"   🎲 Gieo xúc xắc Random(0,1) = {rand_val:.6f}\n"
+            
+            # if Random(0,1) < p
+            if rand_val < p:
+                trace += f"   [🎰 CHẤP NHẬN XÁC SUẤT] Random(0,1) < p: current state = next state\n"
+                raw_frontier_data[0][3] = True
+                current_node = PuzzleNode(next_state, parent=current_node, action=action, cost=h_next, depth=current_node.depth+1, heuristic=h_next)
+            else:
+                trace += f"   [❌ TỪ CHỐI] Random(0,1) >= p: Giữ nguyên vị trí cũ.\n"
+
+        # T = alpha * T
+        T = alpha * T
+        
+        history_log.append({
+            'current_node': current_node.state, 
+            'frontier': raw_frontier_data, 
+            'explored': [f"Nhiệt độ hiện tại: {T:.4f}"], 
+            'trace_text': trace
+        })
+
+    # return current state
+    if current_node.state == goal:
+        return current_node, nodes_expanded, history_log
+        
+    trace_end = f"🛑 Hết thời gian luyện kim! Hệ thống nguội (T <= Tmin) mà không chạm được Goal.\n"
+    history_log.append({'current_node': current_node.state, 'frontier': [], 'explored': [], 'trace_text': trace_end})
+    return None, nodes_expanded, history_log
 
 # =========================================================================
 # GIAO DIỆN ĐỒ HỌA MÔ PHỎNG SỬ DỤNG TKINTER
@@ -651,7 +736,7 @@ def run_local_beam_search(start, goal, k=4):
 class PuzzleGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("8-Puzzle Advanced Workspace Analyser (12 Algorithms Loaded)")
+        self.root.title("8-Puzzle Advanced Workspace Analyser (13 Algorithms Loaded)")
         self.root.geometry("1350x780")
         self.root.configure(bg="#f5f6fa")
 
@@ -675,7 +760,6 @@ class PuzzleGUI:
         left_frame = tk.Frame(main_paned, bg="#f5f6fa")
         main_paned.add(left_frame, width=430)
 
-        # --- KHUNG CẤU HÌNH ĐẦU VÀO SỬ DỤNG GRID RỘNG RÃI, KHÔNG LO BỊ ĐÈ CHỮ ---
         cfg_box = tk.LabelFrame(left_frame, text=" Cấu hình thuật toán & Bài toán ", font=("Helvetica", 10, "bold"), fg="#2980b9", bg="#f5f6fa")
         cfg_box.pack(fill="x", pady=5, ipady=5)
         
@@ -691,9 +775,10 @@ class PuzzleGUI:
             "Steepest Hill Climbing (Leo đồi dốc đứng)",
             "Stochastic Hill Climbing (Leo đồi ngẫu nhiên)",
             "Random Restart Hill Climbing (Leo đồi lặp ngẫu nhiên)",
-            "Local Beam Search (Tìm kiếm chùm cục bộ)"
+            "Local Beam Search (Tìm kiếm chùm cục bộ)",
+            "Simulated Annealing (Luyện kim mô phỏng)"
         ], font=("Helvetica", 9), state="readonly")
-        self.algo_combo.current(7) 
+        self.algo_combo.current(12) # Mặc định trỏ sẵn vào Simulated Annealing
         self.algo_combo.pack(fill="x", padx=15, pady=6)
 
         io_frame = tk.Frame(cfg_box, bg="#f5f6fa")
@@ -811,6 +896,7 @@ class PuzzleGUI:
         elif "A*" in algo_choice: self.front_panel.config(text=" Frontier List (Min-Heap sắp xếp theo f(n) = g + h) ")
         elif "IDA*" in algo_choice: self.front_panel.config(text=" Frontier Trạng thái duyệt theo Bound f(n) ")
         elif "Beam" in algo_choice: self.front_panel.config(text=" Toàn bộ lân cận sinh ra (Neighbor_States) ")
+        elif "Annealing" in algo_choice: self.front_panel.config(text=" Trạng thái lân cận ngẫu nhiên được chọn thử nghiệm ")
         else: self.front_panel.config(text=" Nhánh lân cận (Đang sinh thực tế) ")
 
         self.lbl_status.config(text="Đã chuyển thuật toán. Hãy nhấn nút Go!", fg="#e67e22")
@@ -843,13 +929,14 @@ class PuzzleGUI:
         elif "dốc đứng" in algo_choice: res_node, nodes, history = run_steepest_ascent_hill_climbing(self.initial_state, self.goal_state)
         elif "ngẫu nhiên" in algo_choice and "lặp" not in algo_choice: res_node, nodes, history = run_stochastic_hill_climbing(self.initial_state, self.goal_state)
         elif "lặp" in algo_choice: res_node, nodes, history = run_random_restart_hill_climbing(self.initial_state, self.goal_state, max_restart=5)
-        else: res_node, nodes, history = run_local_beam_search(self.initial_state, self.goal_state, k=3)
+        elif "Beam" in algo_choice: res_node, nodes, history = run_local_beam_search(self.initial_state, self.goal_state, k=3)
+        else: res_node, nodes, history = run_simulated_annealing(self.initial_state, self.goal_state, T0=100.0, Tmin=0.1, alpha=0.95)
 
         self.algorithm_history = history
         self.saved_res_node = res_node
 
         if res_node is None:
-            if any(key in algo_choice for key in ["đơn giản", "dốc đứng", "ngẫu nhiên", "Hill Climbing", "lặp", "Beam"]):
+            if any(key in algo_choice for key in ["đơn giản", "dốc đứng", "ngẫu nhiên", "Hill Climbing", "lặp", "Beam", "Annealing"]):
                 self.lbl_status.config(text="KẸT CỰC ĐẠI CỤC BỘ / THẤT BẠI!", fg="#e74c3c")
             else:
                 self.lbl_status.config(text="Không tìm thấy lời giải trong giới hạn quét!", fg="#e74c3c")
@@ -862,7 +949,7 @@ class PuzzleGUI:
     def print_solution_log(self):
         self.txt_solution_path.delete("1.0", tk.END)
         if not self.saved_res_node:
-            self.txt_solution_path.insert(tk.END, "❌ KHÔNG TÌM ĐƯỢC LỜI GIẢI ĐÍCH!\n(Giải thuật kết thúc tại nút cực đại cục bộ)")
+            self.txt_solution_path.insert(tk.END, "❌ KHÔNG TÌM ĐƯỢC LỜI GIẢI ĐÍCH!\n(Giải thuật kết thúc tại nút cực đại cục bộ / Hết thời gian luyện kim)")
             return
         
         solution_nodes = []
@@ -918,13 +1005,13 @@ class PuzzleGUI:
             if step_data['frontier']:
                 b_v = step_data['frontier'][0][0]
                 self.txt_frontier.insert(tk.END, f"Ngưỡng chặn Bound hiện tại: {b_v}\nĐang quét sâu hạ tầng DFS...")
-        elif "Hill Climbing" in algo_choice or "Steepest" in algo_choice or "Stochastic" in algo_choice or "lặp" in algo_choice or "Beam" in algo_choice:
+        elif "Hill Climbing" in algo_choice or "Steepest" in algo_choice or "Stochastic" in algo_choice or "lặp" in algo_choice or "Beam" in algo_choice or "Annealing" in algo_choice:
             self.txt_frontier.insert(tk.END, f"--- LÂN CẬN (NEIGHBORS) ĐÃ SINH TRONG LƯỢT ---\n")
             if not step_data['frontier']: 
                 self.txt_frontier.insert(tk.END, f"(Trống hoặc Vòng khởi tạo/Lượt lặp mới)\n")
             else:
                 for idx, item in enumerate(step_data['frontier']):
-                    if len(item) == 4 and ("Stochastic" in algo_choice or "lặp" in algo_choice or "Beam" in algo_choice):
+                    if len(item) == 4:
                         h_v, state, action, is_chosen = item[0], item[1], item[2], item[3]
                         flag_chosen = "  ⭐ [BETTER CHỌN]" if is_chosen else ""
                         self.txt_frontier.insert(tk.END, f"[{idx}] Nhánh [{action}] h={h_v} -> {state}{flag_chosen}\n")
@@ -935,15 +1022,17 @@ class PuzzleGUI:
             if "Steepest" in algo_choice:
                 self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú dốc đứng: Sinh hết rồi lựa chọn con tốt nhất.")
             elif "lặp" in algo_choice:
-                self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú lặp ngẫu nhiên: Theo dõi chỉ số lượt lặp 'i' trên bảng Trace log. Nếu kẹt, vòng 'for' nhảy sang lượt 'i' kế tiếp cùng bàn cờ random mới.")
+                self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú lặp ngẫu nhiên: Theo dõi chỉ số lượt lặp 'i' trên bảng Trace log. Nếu kẹt, thoát lặp nhảy sang lượt mới kèm bàn cờ random.")
             elif "Stochastic" in algo_choice:
                 self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú ngẫu nhiên: Lọc những con tốt hơn hiện tại (Manhattan), rồi bốc thăm ngẫu nhiên 1 con.")
             elif "Beam" in algo_choice:
                 self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú Chùm cục bộ: Tất cả nhánh con gom chung vào tập Neighbor_States, lọc ra k=3 nút có khoảng cách Manhattan ngắn nhất đưa vào chùm kế tiếp.")
+            elif "Annealing" in algo_choice:
+                self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú Luyện kim mô phỏng: Thử nghiệm ngẫu nhiên một nhánh. Nếu Delta < 0 (giảm số ô sai vị trí) thì chấp nhận ngay. Nếu Delta >= 0, tính xác suất dựa vào nhiệt độ T để quyết định.")
             else:
                 self.txt_frontier.insert(tk.END, f"\n⚠️ Ghi chú đơn giản: Gặp cấu hình tốt hơn đầu tiên là chốt rẽ nhánh ngay!")
                 
-        self.txt_explored.insert(tk.END, f"--- TRẠNG THÁI CHÙM HIỆN TẠI / TẬP ĐÓNG ({len(step_data['explored'])} nút) ---\n")
+        self.txt_explored.insert(tk.END, f"--- TẬP ĐÓNG TRÙNG LẶP / TRẠNG THÁI CHÙM HIỆN TẠI ({len(step_data['explored'])} nút) ---\n")
         for state in step_data['explored']: self.txt_explored.insert(tk.END, f" • {state}\n")
 
     def update_playback_ui_state(self):
@@ -983,8 +1072,8 @@ class PuzzleGUI:
                     messagebox.showinfo("Mô phỏng hoàn tất", "Thuật toán đã tìm được ĐÍCH thành công!")
                 else:
                     algo_choice = self.algo_combo.get()
-                    if any(k in algo_choice for k in ["Hill Climbing", "Steepest", "Stochastic", "lặp", "Beam"]):
-                        messagebox.showwarning("Dừng giải thuật", "Thuật toán kết thúc (Cực đại cục bộ / Hết lượt lặp / Kẹt chùm)!")
+                    if any(k in algo_choice for k in ["Hill Climbing", "Steepest", "Stochastic", "lặp", "Beam", "Annealing"]):
+                        messagebox.showwarning("Dừng giải thuật", "Thuật toán kết thúc (Cực đại cục bộ / Hệ thống nguội hoàn toàn)!")
                     else:
                         messagebox.showwarning("Mô phỏng dừng", "Không tìm được đường đi thích hợp!")
                 self.print_solution_log()

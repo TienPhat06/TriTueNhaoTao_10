@@ -1,6 +1,7 @@
 ![Demo](./Visualization.gif)
 ![Demo](./SimulatedAnnealing.gif)
 ![Demo](./Belief-Start.gif)
+![Demo](./AND_OR_GRAPH.gif)
 ---
 
 ## 🛠️ Các thuật toán tìm kiếm được tích hợp
